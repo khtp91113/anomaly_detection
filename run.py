@@ -22,6 +22,10 @@ with open('max.json', 'r') as fo:
     max_dict = d
 
 def main():
+    if len(sys.argv) != 2:
+        print 'Usage: python run.py {interface}'
+        sys.exit(1)
+
     model_path = 'gru_best_weight_1_7_640u.hdf5'
     model = K.models.load_model(model_path)
     global flow_statics, lock1, lock2, lock_count, memory_data, timestep
@@ -30,7 +34,8 @@ def main():
     lock_count = 0
     flow_statics = {}
     e = threading.Event()
-    t = threading.Thread(target=_sniff, args=(e,))
+    iface = sys.argv[1]
+    t = threading.Thread(target=_sniff, args=(e, iface, ))
     # start sniffing
     t.start()
     stop_flag = False
@@ -65,8 +70,8 @@ def main():
     # stop sniffing
     e.set()
 
-def _sniff(e):
-    num = sniff(iface='eno1', filter='ip', store=False, prn=process, stop_filter=lambda x: e.is_set())
+def _sniff(e, iface):
+    num = sniff(iface=iface, filter='ip', store=False, prn=process, stop_filter=lambda x: e.is_set())
 
 def feature_default():
     data = []
