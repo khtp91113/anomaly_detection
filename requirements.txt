@@ -1,5 +1,5 @@
-numpy
-keras
-tensorflow
-scapy
-flask
+numpy==1.16.4
+keras==2.2.4
+tensorflow-gpu==1.14.0
+scapy==2.4.3
+flask==1.1.1

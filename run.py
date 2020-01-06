@@ -15,6 +15,7 @@ memory_data = [{} for x in range(timestep)]
 min_dict = {}
 max_dict = {}
 hq = []
+warning_list = []
 
 start_flag = False
 app = Flask(__name__)
@@ -47,7 +48,14 @@ def task():
         t_calculate.start()
         return 'start running'
 
-
+@app.route('/warning', methods=['GET'])
+def warning():
+    global warn_lock, warning_list
+    warn_lock.acquire()
+    tmp = str(warning_list)
+    warn_lock.release()
+    return tmp
+    
 with open('min.json', 'r') as fo:
     d = json.load(fo)
     min_dict = d
@@ -56,13 +64,14 @@ with open('max.json', 'r') as fo:
     max_dict = d
 
 def main():
-    if len(sys.argv) != 2:
-        print 'Usage: python run.py {interface}'
+    if len(sys.argv) != 3:
+        print 'Usage: python run.py {mirror_interface} {manage_interface_ip}'
         sys.exit(1)
 
-    global lock
+    global lock, warn_lock
     lock = threading.Lock()
-    app.run(host='140.116.245.248', port=9999)
+    warn_lock = threading.Lock()
+    app.run(host=sys.argv[2], port=9999)
 
 
 def _dojob(e, model):
@@ -118,6 +127,7 @@ def run_exp(model):
     tuples = memory_data[-1].keys()
     # traceback memory data
     print 'test targets num: ', str(len(tuples))
+    tmp_warning_list = []
     for t in tuples:
         datas = []
         for mem in memory_data:
@@ -125,7 +135,15 @@ def run_exp(model):
                 datas.append(mem[t])
             else:
                 datas.append(feature_default())
+        result = np.argmax(model.predict(np.array([datas])), axis=1)
         print str(t), str(np.argmax(model.predict(np.array([datas])), axis=1))
+        if result == 1:
+            tmp_warning_list.append(str(t))
+
+    global warn_lock, warning_list
+    warn_lock.acquire()
+    warning_list = tmp_warning_list
+    warn_lock.release()
     return
 
 def process(packet):
