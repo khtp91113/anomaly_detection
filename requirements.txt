@@ -1,6 +1,6 @@
 numpy==1.16.4
 keras==2.2.4
 scipy==1.2.2
-tensorflow-gpu==1.14.0
+tensorflow-gpu==1.15.0
 scapy==2.4.3
 flask==1.1.1
