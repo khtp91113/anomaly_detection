@@ -4,9 +4,9 @@ import keras as K
 import time
 import random
 import sys
-import gc
 import threading
 from scapy.all import *
+from flask import *
 
 polling_interval = 5
 feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX']
@@ -14,6 +14,40 @@ timestep = 7
 memory_data = [{} for x in range(timestep)]
 min_dict = {}
 max_dict = {}
+hq = []
+
+start_flag = False
+app = Flask(__name__)
+@app.route('/task', methods=['POST'])
+def task():
+    global e, start_flag
+    task = request.values['action']
+    if task == 'stop':
+        if start_flag == False:
+            return 'service current not running'
+        e.set()
+        start_flag = False
+        return 'send stop signal'
+    elif task == 'start':
+        if start_flag == True:
+            return 'service already running'
+        global flow_statics
+        flow_statics = {}
+        e = threading.Event()
+        iface = sys.argv[1]
+        start_flag = True
+        t_sniff = threading.Thread(target=_sniff, args=(e, iface, ))
+        t_calculate = threading.Thread(target=_calculate, args=(e, ))
+        model_path = 'gru_best_weight_1_7_640u.hdf5'
+        model = K.models.load_model(model_path)
+        model.predict(np.array([[feature_default() for x in range(timestep)]]))
+        t_dojob = threading.Thread(target=_dojob, args=(e, model, ))
+        t_dojob.start()
+        t_sniff.start()
+        t_calculate.start()
+        return 'start running'
+
+
 with open('min.json', 'r') as fo:
     d = json.load(fo)
     min_dict = d
@@ -26,49 +60,40 @@ def main():
         print 'Usage: python run.py {interface}'
         sys.exit(1)
 
-    model_path = 'gru_best_weight_1_7_640u.hdf5'
-    model = K.models.load_model(model_path)
-    global flow_statics, lock1, lock2, lock_count, memory_data, timestep
-    lock1 = threading.Lock()
-    lock2 = threading.Lock()
-    lock_count = 0
-    flow_statics = {}
-    e = threading.Event()
-    iface = sys.argv[1]
-    t = threading.Thread(target=_sniff, args=(e, iface, ))
-    # start sniffing
-    t.start()
-    stop_flag = False
-    count = 0
-    while stop_flag == False:
+    global lock
+    lock = threading.Lock()
+    app.run(host='140.116.245.248', port=9999)
+
+
+def _dojob(e, model):
+    global lock
+    while e.is_set() == False:
+        lock.acquire()
+        if len(hq) != 0:
+            obj = hq.pop(0)
+            lock.release()
+            if type(obj) == str:
+                global flow_statics
+                tmp_flow_statics = flow_statics
+                flow_statics = {}
+
+                # calculate features in last 5 seconds
+                result = calculate_feature(tmp_flow_statics)
+                memory_data.pop(0)
+                memory_data.append(result)
+                run_exp(model)
+            else:
+                feature_extract(obj)
+        else:
+            lock.release()
+
+def _calculate(e):
+    while e.is_set() == False:
         time.sleep(5)
-
-        lock1.acquire()
-        lock_count += 1
-        if lock_count == 1:
-            lock2.acquire()
-        lock1.release()
-
-        tmp_flow_statics = flow_statics
-        flow_statics = {}
-        
-        lock1.acquire()
-        lock_count -= 1
-        if lock_count == 0:
-            lock2.release()
-        lock1.release()
-
-        # calculate features in last 5 seconds
-        result = calculate_feature(tmp_flow_statics)
-        memory_data.pop(0)
-        memory_data.append(result)
-        run_exp(model)
-
-        count += 1
-        if count == 12:
-            stop_flag = True
-    # stop sniffing
-    e.set()
+        global lock
+        lock.acquire()
+        hq.insert(0, 'calculate')
+        lock.release()
 
 def _sniff(e, iface):
     num = sniff(iface=iface, filter='ip', store=False, prn=process, stop_filter=lambda x: e.is_set())
@@ -87,7 +112,6 @@ def feature_default():
     return data
 
 def run_exp(model):
-    num_feature = 15
     print 'start testing'
     # get 5-tuple in last memory data
     global memory_data
@@ -100,17 +124,18 @@ def run_exp(model):
             if t in mem:
                 datas.append(mem[t])
             else:
-                datas.append(feature_default())   
-
+                datas.append(feature_default())
         print str(t), str(np.argmax(model.predict(np.array([datas])), axis=1))
     return
 
 def process(packet):
-    feature_extract(packet)
+    global lock
+    lock.acquire()
+    hq.append(packet)
+    lock.release()
+    #feature_extract(packet)
 
 def feature_extract(pkt):
-    global lock2
-    lock2.acquire()
     global flow_statics
     # params. of epochs
     if pkt.haslayer(IP):
@@ -157,8 +182,6 @@ def feature_extract(pkt):
             pass
         if flow_statics[(sip, dip, sport, dport, protocol)]['first_seen'] == 0:
             flow_statics[(sip, dip, sport, dport, protocol)]['first_seen'] = pkt.time
-        if flow_statics[(sip, dip, sport, dport, protocol)]['FPS'] == 0: 
-            flow_statics[(sip, dip, sport, dport, protocol)]['first_seen'] = pkt.time
         if flow_statics[(sip, dip, sport, dport, protocol)]['FPS'] == 0:
             flow_statics[(sip, dip, sport, dport, protocol)]['FPS'] = len(pkt.payload)
         flow_statics[(sip, dip, sport, dport, protocol)]['TBT'] += len(pkt.payload)
@@ -166,7 +189,6 @@ def feature_extract(pkt):
         if flow_statics[(sip, dip, sport, dport, protocol)]['last_seen'] != 0:
             flow_statics[(sip, dip, sport, dport, protocol)]['inter_arrival'].append(pkt.time-flow_statics[(sip, dip, sport, dport, protocol)]['last_seen'])
         flow_statics[(sip, dip, sport, dport, protocol)]['last_seen'] = pkt.time
-    lock2.release()
 
 # TODO every 5 seconds calculate once
 def calculate_feature(flow_statics):
