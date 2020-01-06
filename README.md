@@ -3,12 +3,12 @@
 * Install Cuda & Cudnn in Host
 
 * Run docker:
-    * cat detector.tar | sudo docker import - tensorflow/tensorflow:1.14.0-gpu
-    * sudo docker run --runtime=nvidia -p 9999:9999 --name c1 -itd tensorflow/tensorflow:1.14.0-gpu bash
+    * sudo docker load -i detector_save.tar
+    * sudo docker run --runtime=nvidia -p 9999:9999 --name c1 -itd c1 bash
 
 * If install sourcecode from github
     * apt update
-    * apt install git python python-pip net-tools iperf iputils-ping tcpdump
+    * apt install git python python-pip net-tools iperf iputils-ping tcpdump netbase -y
     * cd /home
     * git clone https://github.com/khtp91113/anomaly_detection.git
     * cd anomaly_detection
@@ -21,8 +21,8 @@
 
 * using POST method to start/stop AI detector
 
-url: {host-ip}:9999/task={start/stop}
+    * url: {host-ip}:9999/task={start/stop}
 
 * using GET method to get warning host
 
-url: {host-ip}:9999/warning
+    * url: {host-ip}:9999/warning
