@@ -3,8 +3,8 @@
 * Install Cuda & Cudnn in Host
 
 * Run docker:
-    * sudo docker load -i detector_save.tar
-    * sudo docker run --runtime=nvidia -p 9999:9999 --name c1 -itd c1 bash
+    * sudo docker load -i DDoS_detect.tar
+    * sudo docker run --runtime=nvidia -p 9999:9999 --name c1 -itd ddos_detect eth0 172.17.0.2
 
 * If install sourcecode from github
     * apt update
@@ -13,9 +13,6 @@
     * git clone https://github.com/khtp91113/anomaly_detection.git
     * cd anomaly_detection
     * pip install -r requirements.txt
-
-* Usage:
-    * cd /home/anomaly_detection
     * python run.py {mirror-interface} {management-ipaddr}
     * ex: python run.py eth0 172.17.0.2
 
