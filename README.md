@@ -1,6 +1,8 @@
+* Install nvidia driver in Host
+
 * Install nvidia-docker in Host(run nvidia device on docker):
+    * Ref: https://github.com/NVIDIA/nvidia-docker
     * Ref: https://github.com/NVIDIA/nvidia-docker/wiki/Installation-(version-2.0)
-* Install Cuda & Cudnn in Host
 
 * Run docker:
     * sudo docker load -i DDoS_detect.tar
