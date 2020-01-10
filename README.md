@@ -4,9 +4,9 @@
     * Ref: https://github.com/NVIDIA/nvidia-docker
     * Ref: https://github.com/NVIDIA/nvidia-docker/wiki/Installation-(version-2.0)
 
-* Run docker:
-    * sudo docker load -i DDoS_detect.tar
-    * sudo docker run --runtime=nvidia -p 9999:9999 --name c1 -itd ddos_detect eth0 172.17.0.2
+* Run docker: (port mapping: host port 9999 -> docker port 9999)
+    * sudo docker load -i ddos_detect.tar
+    * sudo docker run --runtime=nvidia -p 9999:9999 --name c1 -itd ddos_detect <docker ifname> <docker ipv4>
 
 * If install sourcecode from github
     * apt update
@@ -19,9 +19,9 @@
     * ex: python run.py eth0 172.17.0.2
 
 * using POST method to start/stop AI detector
-
-    * url: {host-ip}:9999/task={start/stop}
+    * url: {host-ip}:9999/task?action={start/stop}
+        * start: start service to sniff packets, analyze and report
+        * stop: stop service
 
 * using GET method to get warning host
-
     * url: {host-ip}:9999/warning
