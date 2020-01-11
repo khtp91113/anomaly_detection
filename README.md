@@ -6,7 +6,7 @@
 
 * Run docker: (port mapping: host port 9999, 10000 -> docker port 9999, 10000)
     * sudo docker load -i ddos_detect.tar
-    * sudo docker run --runtime=nvidia -p 9999:9999 -p 10000:10000 --name c1 -itd ddos_detect <container ifname> <container ipv4>
+    * sudo docker run --runtime=nvidia -p 9999:9999 -p 10000:10000/tcp -p 10000:10000/udp --name c1 -itd ddos_detect <container ifname> <container ipv4>
 
 * If install sourcecode from github
     * apt update
