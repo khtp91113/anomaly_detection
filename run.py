@@ -5,15 +5,15 @@ import time
 import random
 import sys
 import threading
+from datetime import datetime
 from scapy.all import *
 from flask import *
+import prctl
 
 polling_interval = 5
 feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX']
 timestep = 7
 memory_data = [{} for x in range(timestep)]
-min_dict = {}
-max_dict = {}
 hq = []
 warning_list = []
 
@@ -21,32 +21,37 @@ start_flag = False
 app = Flask(__name__)
 @app.route('/task', methods=['POST'])
 def task():
-    global e, start_flag
+    global start_flag, flow_statics, t_dojob, t_sniff, t_calculate, e
     task = request.values['action']
     if task == 'stop':
         if start_flag == False:
-            return 'service current not running'
+            return 'service is not running'
         e.set()
+        t_dojob.join()
+        t_sniff.join()
+        t_calculate.join()
         start_flag = False
-        return 'send stop signal'
+        return 'service stop'
     elif task == 'start':
         if start_flag == True:
-            return 'service already running'
-        global flow_statics
+            return 'service is already running'
         flow_statics = {}
-        e = threading.Event()
-        iface = sys.argv[1]
         start_flag = True
-        t_sniff = threading.Thread(target=_sniff, args=(e, iface, ))
-        t_calculate = threading.Thread(target=_calculate, args=(e, ))
-        model_path = 'gru_best_weight_1_7_640u.hdf5'
+        
+        model_path = 'model.hdf5'
         model = K.models.load_model(model_path)
         model.predict(np.array([[feature_default() for x in range(timestep)]]))
-        t_dojob = threading.Thread(target=_dojob, args=(e, model, ))
+
+        e = threading.Event()
+        iface = sys.argv[1]
+        t_sniff = threading.Thread(target=_sniff, args=(e, iface, ), name='t_sniff')
+        t_calculate = threading.Thread(target=_calculate, args=(e, ), name='t_calculate')
+        t_dojob = threading.Thread(target=_dojob, args=(e, model, ), name='t_dojob')
+
         t_dojob.start()
         t_sniff.start()
         t_calculate.start()
-        return 'start running'
+        return 'service start'
 
 @app.route('/warning', methods=['GET'])
 def warning():
@@ -55,13 +60,10 @@ def warning():
     tmp = str(warning_list)
     warn_lock.release()
     return tmp
-    
-with open('min.json', 'r') as fo:
-    d = json.load(fo)
-    min_dict = d
-with open('max.json', 'r') as fo:
-    d = json.load(fo)
-    max_dict = d
+
+dic = {}
+with open('mean_std.json', 'r') as f:
+    dic = json.load(f)
 
 def main():
     if len(sys.argv) != 3:
@@ -71,10 +73,13 @@ def main():
     global lock, warn_lock
     lock = threading.Lock()
     warn_lock = threading.Lock()
+
+
     app.run(host=sys.argv[2], port=9999)
 
 
 def _dojob(e, model):
+    prctl.set_name('AI detector - do job')
     global lock
     while e.is_set() == False:
         lock.acquire()
@@ -95,8 +100,11 @@ def _dojob(e, model):
                 feature_extract(obj)
         else:
             lock.release()
+    K.backend.clear_session()
+    del model
 
 def _calculate(e):
+    prctl.set_name('AI detector - schedule calculate feature')
     while e.is_set() == False:
         time.sleep(5)
         global lock
@@ -105,6 +113,7 @@ def _calculate(e):
         lock.release()
 
 def _sniff(e, iface):
+    prctl.set_name('AI detector - sniff packet')
     num = sniff(iface=iface, filter='ip', store=False, prn=process, stop_filter=lambda x: e.is_set())
 
 def feature_default():
@@ -116,7 +125,7 @@ def feature_default():
             value = 1.0
         else:
             value = 0.0
-        norm = (value-min_dict[feature])/(max_dict[feature]-min_dict[feature])
+        norm = (value-float(dic[feature]['m']))/float(dic[feature]['s'])
         data.append(norm)
     return data
 
@@ -151,7 +160,6 @@ def process(packet):
     lock.acquire()
     hq.append(packet)
     lock.release()
-    #feature_extract(packet)
 
 def feature_extract(pkt):
     global flow_statics
@@ -248,17 +256,10 @@ def normalize(flow_statics):
     for index in flow_statics:
         data = []
         for feature in feature_set:
-            norm = (flow_statics[index][feature]-min_dict[feature])/(max_dict[feature]-min_dict[feature])
-            if norm > 1:
-                norm = 1
-            elif norm < 0:
-                norm = 0
-            else:
-                pass
+            norm = (float(flow_statics[index][feature])-float(dic[feature]['m']))/float(dic[feature]['s'])
             data.append(norm)
         flow_statics[index] = data
     return flow_statics
             
-
 if __name__ == '__main__':
     main()
