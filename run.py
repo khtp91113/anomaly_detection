@@ -9,6 +9,7 @@ from datetime import datetime
 from scapy.all import *
 from flask import *
 import prctl
+import requests
 
 polling_interval = 5
 feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX']
@@ -53,13 +54,13 @@ def task():
         t_calculate.start()
         return 'service start'
 
-@app.route('/warning', methods=['GET'])
-def warning():
-    global warn_lock, warning_list
-    warn_lock.acquire()
-    tmp = str(warning_list)
-    warn_lock.release()
-    return tmp
+#@app.route('/warning', methods=['GET'])
+#def warning():
+#    global warn_lock, warning_list
+#    warn_lock.acquire()
+#    tmp = str(warning_list)
+#    warn_lock.release()
+#    return tmp
 
 dic = {}
 with open('mean_std.json', 'r') as f:
@@ -70,9 +71,9 @@ def main():
         print 'Usage: python run.py {mirror_interface} {manage_interface_ip}'
         sys.exit(1)
 
-    global lock, warn_lock
+    global lock#, warn_lock
     lock = threading.Lock()
-    warn_lock = threading.Lock()
+    #warn_lock = threading.Lock()
 
 
     app.run(host=sys.argv[2], port=9999)
@@ -129,6 +130,18 @@ def feature_default():
         data.append(norm)
     return data
 
+def post_controller(warning_list):
+    url = 'http://140.116.245.248:8181/restconf/config/estinet:estinet/ai_detector_blacklists'
+    datas = {'ai_detector_black_list':[]}
+    for warn in warning_list:
+        tmp = warn.split("'")
+        data = {'IP': str(tmp[1]), 'port': str(tmp[5])}
+        datas['ai_detector_black_list'].append(data)
+    try:        
+        r = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(datas))
+    finally:
+        return
+
 def run_exp(model):
     print 'start testing'
     # get 5-tuple in last memory data
@@ -147,12 +160,13 @@ def run_exp(model):
         result = np.argmax(model.predict(np.array([datas])), axis=1)
         print str(t), str(np.argmax(model.predict(np.array([datas])), axis=1))
         if result == 1:
-            tmp_warning_list.append(str(t))
+            tmp_warning_list.append(t)
 
-    global warn_lock, warning_list
-    warn_lock.acquire()
-    warning_list = tmp_warning_list
-    warn_lock.release()
+    post_controller(tmp_warning_list)
+    #global warn_lock, warning_list
+    #warn_lock.acquire()
+    #warning_list = tmp_warning_list
+    #warn_lock.release()
     return
 
 def process(packet):
@@ -175,8 +189,8 @@ def feature_extract(pkt):
             protocol = 'TCP'
         else:
             return
-        sport = pkt[protocol].sport
-        dport = pkt[protocol].dport
+        sport = str(pkt[protocol].sport)
+        dport = str(pkt[protocol].dport)
         # 5-tuple
         if (sip, dip, sport, dport, protocol) not in flow_statics:
             flow_statics[(sip, dip, sport, dport, protocol)] = {
@@ -249,6 +263,8 @@ def calculate_feature(flow_statics):
         flow_statics[key].pop('first_seen', None)
         flow_statics[key].pop('inter_arrival', None)
 
+    if ('140.116.245.246', '140.116.245.248', 2000, 10000, 'TCP') in flow_statics:
+        print flow_statics[('140.116.245.246', '140.116.245.248', 2000, 10000, 'TCP')]
     flow_statics = {str(key): value for key, value in flow_statics.items()}
     return normalize(flow_statics)
 
