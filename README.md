@@ -26,8 +26,10 @@
     * using command "ps -eT" to see whether python threads are running
         * 3 threads with names "AI detector - ..."
 
-* using GET method to get warning host
-    * url: {host-ip}:9999/warning
+* detector will POST anomaly target to server(server.py) every 5 seconds
+    * build server: python server.py {server-IP}
+    * using GET method to server to get blacklist
+    * url: {server-IP}:8181/restconf/config/estinet:estinet/ai_detector_blacklists
 
 * Test
     * using iperf to test, open iperf server at port 10000
