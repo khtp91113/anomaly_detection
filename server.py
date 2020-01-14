@@ -1,7 +1,7 @@
 from flask import *
 import requests
 import json
-
+import sys
 blacklist = {'ai_detector_blacklists':{}}
 
 app = Flask(__name__)
