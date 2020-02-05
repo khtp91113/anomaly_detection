@@ -7,9 +7,11 @@ import sys
 import threading
 from datetime import datetime
 from scapy.all import *
-from flask import *
 import prctl
-import requests
+import paho.mqtt.client as mqtt
+import paho.mqtt.publish as publish
+import signal
+import netifaces as ni
 
 polling_interval = 5
 feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX']
@@ -19,64 +21,84 @@ hq = []
 warning_list = []
 
 start_flag = False
-app = Flask(__name__)
-@app.route('/task', methods=['POST'])
-def task():
-    global start_flag, flow_statics, t_dojob, t_sniff, t_calculate, e
-    task = request.values['action']
-    if task == 'stop':
-        if start_flag == False:
-            return 'service is not running'
-        e.set()
-        t_dojob.join()
-        t_sniff.join()
-        t_calculate.join()
-        start_flag = False
-        return 'service stop'
-    elif task == 'start':
-        if start_flag == True:
-            return 'service is already running'
-        flow_statics = {}
-        start_flag = True
-        
-        model_path = 'model.hdf5'
-        model = K.models.load_model(model_path)
-        model.predict(np.array([[feature_default() for x in range(timestep)]]))
-
-        e = threading.Event()
-        iface = sys.argv[1]
-        t_sniff = threading.Thread(target=_sniff, args=(e, iface, ), name='t_sniff')
-        t_calculate = threading.Thread(target=_calculate, args=(e, ), name='t_calculate')
-        t_dojob = threading.Thread(target=_dojob, args=(e, model, ), name='t_dojob')
-
-        t_dojob.start()
-        t_sniff.start()
-        t_calculate.start()
-        return 'service start'
-
-#@app.route('/warning', methods=['GET'])
-#def warning():
-#    global warn_lock, warning_list
-#    warn_lock.acquire()
-#    tmp = str(warning_list)
-#    warn_lock.release()
-#    return tmp
-
 dic = {}
 with open('mean_std.json', 'r') as f:
     dic = json.load(f)
 
+def on_connect(mq, userdata, flags, rc):
+    mq.subscribe('action')
+
+def on_message(mq, userdata, msg):
+    print 'topic: ', msg.topic
+    print 'payload: ', msg.payload
+    global start_flag, flow_statics, t_dojob, t_sniff, t_calculate, e
+    if msg.topic == 'action':
+        if msg.payload == 'start':
+            if start_flag == True:
+                print 'service is already running'
+                return
+            flow_statics = {}
+            start_flag = True
+            
+            model_path = 'model.hdf5'
+            model = K.models.load_model(model_path)
+            model.predict(np.array([[feature_default() for x in range(timestep)]]))
+
+            e = threading.Event()
+            iface = 'eth0'
+            ip = ni.ifaddresses(iface)[2][0]['addr']
+            print 'listen ip', ip
+            t_sniff = threading.Thread(target=_sniff, args=(e, iface, ), name='t_sniff')
+            t_calculate = threading.Thread(target=_calculate, args=(e, ), name='t_calculate')
+            t_dojob = threading.Thread(target=_dojob, args=(e, model, ), name='t_dojob')
+
+            t_dojob.start()
+            t_sniff.start()
+            t_calculate.start()
+            print 'service start'
+            return
+        elif msg.payload == 'stop':
+            if start_flag == False:
+                print 'service is not running'
+                return
+            e.set()
+            t_dojob.join()
+            print 'dojob end'
+            t_sniff.join()
+            print 'sniff end'
+            t_calculate.join()
+            print 'calculate end'
+            start_flag = False
+            print 'service stop'
+            return
+
+def exit(signum, frame):
+    global client
+    client.disconnect()
+    print 'mqtt disconnect'
+    sys.exit(1)
+
 def main():
     if len(sys.argv) != 3:
-        print 'Usage: python run.py {mirror_interface} {manage_interface_ip}'
+        print 'Usage: python run.py {broker_ip} {broker_port}'
         sys.exit(1)
 
-    global lock#, warn_lock
+
+    global client
+    client = mqtt.Client()
+    client.on_connect = on_connect
+    client.on_message = on_message
+    try:
+        client.connect(sys.argv[1], sys.argv[2])
+    except:
+        print 'can''t connect to broker'
+        return
+
+    signal.signal(signal.SIGINT, exit)
+    signal.signal(signal.SIGTERM, exit)
+    global lock
     lock = threading.Lock()
-    #warn_lock = threading.Lock()
-
-
-    app.run(host=sys.argv[2], port=9999)
+    client.loop_forever()
 
 
 def _dojob(e, model):
@@ -130,15 +152,17 @@ def feature_default():
         data.append(norm)
     return data
 
-def post_controller(warning_list):
-    url = 'http://140.116.245.248:8181/restconf/config/estinet:estinet/ai_detector_blacklists'
-    datas = {'ai_detector_black_list':[]}
+def post_broker(warning_list):
+    datas = {'blocklists':[]}
     for warn in warning_list:
         tmp = warn.split("'")
         data = {'IP': str(tmp[1]), 'port': str(tmp[5])}
-        datas['ai_detector_black_list'].append(data)
-    try:        
-        r = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(datas))
+        datas['blocklists'].append(data)
+    global client
+    topic = 'blocklist'
+    payload = json.dumps(datas)
+    try:
+        client.publish(topic, payload)
     finally:
         return
 
@@ -162,11 +186,7 @@ def run_exp(model):
         if result == 1:
             tmp_warning_list.append(t)
 
-    post_controller(tmp_warning_list)
-    #global warn_lock, warning_list
-    #warn_lock.acquire()
-    #warning_list = tmp_warning_list
-    #warn_lock.release()
+    post_broker(tmp_warning_list)
     return
 
 def process(packet):

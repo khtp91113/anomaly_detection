@@ -6,7 +6,7 @@
 
 * Run docker: (port mapping: host port 9999, 10000 -> docker port 9999, 10000)
     * sudo docker load -i ddos_detect.tar
-    * sudo docker run --runtime=nvidia -p 9999:9999 -p 10000:10000/tcp -p 10000:10000/udp --name c1 -itd ddos_detect <container ifname> <container ipv4>
+    * sudo docker run --runtime=nvidia -p 9999:9999 -p 10000:10000/tcp -p 10000:10000/udp --name c1 -itd ddos_detect <broker ipv4> <broker port>
 
 * If install sourcecode from github
     * apt update
@@ -15,21 +15,20 @@
     * git clone https://github.com/khtp91113/anomaly_detection.git
     * cd anomaly_detection
     * pip install -r requirements.txt
-    * python run.py {mirror-interface} {management-ipaddr}
-    * ex: python run.py eth0 172.17.0.2
+    * python run.py <broker ipv4> <broker port>
 
 
-* using POST method to start/stop AI detector
-    * url: {host-ip}:9999/task?action={start/stop}
+* using mqtt to start/stop AI detector
+    * Topic: action
+    * Payload: start  or  stop
         * start: start service to sniff packets, analyze and report
         * stop: stop service
     * using command "ps -eT" to see whether python threads are running
         * 3 threads with names "AI detector - ..."
 
-* detector will POST anomaly target to server(server.py) every 5 seconds
-    * build server: python server.py {server-IP}
-    * using GET method to server to get blacklist
-    * url: {server-IP}:8181/restconf/config/estinet:estinet/ai_detector_blacklists
+* detector will publish anomaly target to broker every 5 seconds
+    * Topic: blocklists
+    * Payload: anomaly targets in json format
 
 * Test
     * using iperf to test, open iperf server at port 10000
