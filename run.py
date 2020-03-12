@@ -282,6 +282,8 @@ def _run_exp(flow_statics, src_addr_list, memory_data):
                 if src not in tmp_warning_list:
                     tmp_warning_list.append(src)
                 break
+    if len(tmp_warning_list) == 0:
+        return
     d = {"blocklists": []}
     for data in tmp_warning_list:
         d["blocklists"].append({"mac": data[1], "ipv4": data[0]})
