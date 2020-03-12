@@ -16,6 +16,8 @@ import signal
 import netifaces as ni
 import paho.mqtt.client as mqtt
 import paho.mqtt.publish as publish
+import socket
+import operator
 
 polling_interval = 5
 feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX', 'src_dst_ratio']
@@ -82,10 +84,6 @@ def on_message(mq, userdata, msg):
             flow_statics = {}
             start_flag = True
             
-            model_path = 'model.hdf5'
-            model = K.models.load_model(model_path)
-            model.predict(np.array([[feature_default() for x in range(timestep)]]))
-            
             queue = Queue.Queue()
             e = threading.Event()
             
@@ -151,13 +149,15 @@ def _dojob(e, queue):
             result = calculate_feature(flow_statics)
             memory_data.pop(0)
             memory_data.append(result)
-            t_run_exp = threading.Thread(target=_run_exp, args=(flow_statics, src_addr_list, attacker, memory_data, ))
+            t_run_exp = threading.Thread(target=_run_exp, args=(flow_statics, src_addr_list, memory_data, ))
             t_run_exp.start()
             flow_statics = {}
             src_addr_list = []
             last = time.time()
         elif queue.empty() == False:
             feature_extract(queue.get())
+    with queue.mutex:
+        queue.queue.clear()
             
 def _sniff(e, iface, queue):
     prctl.set_name('AI detector - sniff packet')
@@ -178,7 +178,7 @@ def post_broker(warning_list):
         print 'publish warning failed'
     return
 
-def _run_exp(flow_statics, src_addr_list, attacker, memory_data):
+def _run_exp(flow_statics, src_addr_list, memory_data):
     global ip_model, mac_model
     print 'start testing'
     # get 5-tuple in last memory data
