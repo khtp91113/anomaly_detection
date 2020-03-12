@@ -10,7 +10,7 @@
 
 * If install sourcecode from github
     * apt update
-    * apt install git python python-pip net-tools iperf iputils-ping tcpdump netbase python-prctl -y
+    * apt install git python python-pip net-tools iperf iputils-ping tcpdump netbase python-prctl python-pypcap -y
     * cd /home
     * git clone https://github.com/khtp91113/anomaly_detection.git
     * cd anomaly_detection
@@ -28,7 +28,7 @@
 
 * detector will publish anomaly target to broker every 5 seconds
     * Topic: blocklists
-    * Payload: anomaly targets in json format
+    * Payload: anomaly targets(IP, mac) in json format
 
 * Test
     * using iperf to test, open iperf server at port 10000
