@@ -61,7 +61,7 @@ def on_connect(mq, userdata, flags, rc):
 def on_message(mq, userdata, msg):
     print 'topic: ', msg.topic
     print 'payload: ', msg.payload
-    global start_flag, flow_statics, p_dojob, p_sniff, e, queue
+    global start_flag, flow_statics, p_dojob, p_sniff, e, queue, client
     if msg.topic == 'action':
         if msg.payload == 'start':
             if start_flag == True:
@@ -95,6 +95,7 @@ def on_message(mq, userdata, msg):
             print 'sniff end'
             start_flag = False
             print 'service stop'
+            del queue
             return
 
 def exit(signum, frame):
@@ -161,8 +162,6 @@ def _dojob(e, queue):
             flow_statics = {}
             src_addr_list = []
             last = current
-    with queue.mutex:
-        queue.queue.clear()
     K.backend.clear_session()
     del ip_model
     del mac_model
@@ -177,11 +176,12 @@ def _sniff(e, iface, queue):
             break
 
 def post_broker(warning_list):
-    global client
     topic = 'blocklists'
     payload = json.dumps(warning_list)
+    host = sys.argv[1]
+    port = sys.argv[2]
     try:
-        client.publish(topic, payload)
+        publish.single(topic, payload, hostname=host, port=port)
     except:
         print 'publish warning failed'
     return
@@ -280,7 +280,6 @@ def _run_exp(flow_statics, src_addr_list, memory_data):
             mac_index += 1
     del ip_result
     del mac_result
-    
     for src in src_addr_list:
         same_ports = set(src_IP_port_result[src[0]]).intersection(set(src_MAC_port_result[src[1]]))
         for port in same_ports:
