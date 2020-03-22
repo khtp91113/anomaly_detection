@@ -18,6 +18,7 @@ import paho.mqtt.client as mqtt
 import paho.mqtt.publish as publish
 import socket
 import operator
+import multiprocessing as mp
 
 polling_interval = 5
 feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX', 'src_dst_ratio']
@@ -54,28 +55,13 @@ def feature_default(dic):
 ip_default_feature = feature_default(ip_dic)
 mac_default_feature = feature_default(mac_dic)
 
-ip_graph = Graph()
-with ip_graph.as_default():
-    session1 = Session()
-    with session1.as_default():
-        ip_model = K.models.load_model('gru_add_ip.hdf5')
-        ip_model._make_predict_function()
-
-mac_graph = Graph()
-with mac_graph.as_default():
-    session2 = Session()
-    with session2.as_default():
-        mac_model = K.models.load_model('gru_add_mac.hdf5')
-        mac_model._make_predict_function()
-
-
 def on_connect(mq, userdata, flags, rc):
     mq.subscribe('action')
 
 def on_message(mq, userdata, msg):
     print 'topic: ', msg.topic
     print 'payload: ', msg.payload
-    global start_flag, flow_statics, t_dojob, t_sniff, e, queue
+    global start_flag, flow_statics, p_dojob, p_sniff, e, queue
     if msg.topic == 'action':
         if msg.payload == 'start':
             if start_flag == True:
@@ -84,18 +70,18 @@ def on_message(mq, userdata, msg):
             flow_statics = {}
             start_flag = True
             
-            queue = Queue.Queue()
-            e = threading.Event()
             
             iface = 'eth0'
             ip = ni.ifaddresses(iface)[2][0]['addr']
             print 'listen ip', ip
-            
-            t_sniff = threading.Thread(target=_sniff, args=(e, iface, queue, ), name='t_sniff')
-            t_dojob = threading.Thread(target=_dojob, args=(e, queue, ), name='t_dojob')
+           
+            e = mp.Event()
+            queue = mp.Queue()
+            p_sniff = mp.Process(target=_sniff, args=(e, iface, queue, ), name='t_sniff')
+            p_dojob = mp.Process(target=_dojob, args=(e, queue, ), name='t_dojob')
 
-            t_dojob.start()
-            t_sniff.start()
+            p_dojob.start()
+            p_sniff.start()
             print 'service start'
             return
         elif msg.payload == 'stop':
@@ -103,9 +89,9 @@ def on_message(mq, userdata, msg):
                 print 'service is not running'
                 return
             e.set()
-            t_dojob.join()
+            p_dojob.join()
             print 'dojob end'
-            t_sniff.join()
+            p_sniff.join()
             print 'sniff end'
             start_flag = False
             print 'service stop'
@@ -140,9 +126,29 @@ def main():
 
 def _dojob(e, queue):
     prctl.set_name('AI detector - do job')
+    global session1, session2, ip_model, mac_model
+    ip_graph = Graph()
+    with ip_graph.as_default():
+        session1 = Session()
+        with session1.as_default():
+            ip_model = K.models.load_model('gru_add_ip.hdf5')
+            ip_model._make_predict_function()
+
+    mac_graph = Graph()
+    with mac_graph.as_default():
+        session2 = Session()
+        with session2.as_default():
+            mac_model = K.models.load_model('gru_add_mac.hdf5')
+            mac_model._make_predict_function()
     last = time.time()
     while e.is_set() == False:
-        if time.time() - last >= polling_interval:
+        if queue.empty() == False:
+            obj = queue.get()
+            feature_extract(obj)
+            current = obj[1]
+        else:
+            current = time.time()
+        if current - last >= polling_interval:
             global flow_statics, src_addr_list
 
             # calculate features in last 5 seconds
@@ -151,20 +157,22 @@ def _dojob(e, queue):
             memory_data.append(result)
             t_run_exp = threading.Thread(target=_run_exp, args=(flow_statics, src_addr_list, memory_data, ))
             t_run_exp.start()
+            t_run_exp.join()
             flow_statics = {}
             src_addr_list = []
-            last = time.time()
-        elif queue.empty() == False:
-            feature_extract(queue.get())
+            last = current
     with queue.mutex:
         queue.queue.clear()
+    K.backend.clear_session()
+    del ip_model
+    del mac_model
             
 def _sniff(e, iface, queue):
     prctl.set_name('AI detector - sniff packet')
     pc = pcap.pcap(iface, promisc=True, immediate=True)
     pc.setfilter('ip')
     for ptime, pdata in pc:
-        queue.put((pdata, ptime))
+        queue.put((str(pdata), ptime))
         if e.is_set():
             break
 
@@ -179,7 +187,7 @@ def post_broker(warning_list):
     return
 
 def _run_exp(flow_statics, src_addr_list, memory_data):
-    global ip_model, mac_model
+    global session1, session2, ip_model, mac_model
     print 'start testing'
     # get 5-tuple in last memory data
     tuples = memory_data[-1].keys()
