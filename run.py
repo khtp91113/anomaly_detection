@@ -21,7 +21,7 @@ import operator
 import multiprocessing as mp
 
 polling_interval = 5
-feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX', 'src_dst_ratio']
+feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX']
 timestep = 7
 memory_data = [{} for x in range(timestep)]
 warning_list = []
@@ -149,13 +149,13 @@ def _dojob(e, queue):
         else:
             current = time.time()
         if current - last >= polling_interval:
-            global flow_statics, src_addr_list
+            global flow_statics, src_addr_list, memory_data
 
             # calculate features in last 5 seconds
             result = calculate_feature(flow_statics)
             memory_data.pop(0)
             memory_data.append(result)
-            t_run_exp = threading.Thread(target=_run_exp, args=(flow_statics, src_addr_list, memory_data, ))
+            t_run_exp = threading.Thread(target=_run_exp, args=(result, src_addr_list, memory_data, ))
             t_run_exp.start()
             t_run_exp.join()
             flow_statics = {}
@@ -206,17 +206,17 @@ def _run_exp(flow_statics, src_addr_list, memory_data):
         if '.' in t:
             for mem in memory_data:
                 if t in mem:
-                    datas.append(mem[t])
+                    datas.append(mem[t]+[0])
                 else:
-                    datas.append(ip_default_feature)
+                    datas.append(ip_default_feature+[0])
             ip_data.append(datas)
         # mac 5-tuple
         else:
             for mem in memory_data:
                 if t in mem:
-                    datas.append(mem[t])
+                    datas.append(mem[t]+[0])
                 else:
-                    datas.append(mac_default_feature)
+                    datas.append(mac_default_feature+[0])
             mac_data.append(datas)
     if len(ip_data) == 0 or len(mac_data) == 0:
         return
@@ -419,8 +419,7 @@ def update_data(key, eth, protocol, pkt_time):
             'first_seen': 0,
             'inter_arrival': [],
             'AIT': 0,
-            'PPS': 0,
-            'src_dst_ratio': 0}
+            'PPS': 0}
     flow_statics[key]['PX'] += 1
     # no protocol layer
     if type(proto) == str:
@@ -445,7 +444,8 @@ def update_data(key, eth, protocol, pkt_time):
 
 # TODO every 5 seconds calculate once
 def calculate_feature(flow_statics):
-    dic = {}
+    dst_dic = {}
+    src_dic = {}
     for key in flow_statics:
         flow_statics[key]['PSP'] = round(float(flow_statics[key]['NSP']) / flow_statics[key]['PX'], 2)
         asymmetric = (key[1], key[0], key[3], key[2], key[4])
@@ -476,13 +476,6 @@ def calculate_feature(flow_statics):
         flow_statics[key].pop('last_seen', None)
         flow_statics[key].pop('first_seen', None)
         flow_statics[key].pop('inter_arrival', None)
-        dst = key[1]
-        if dst not in dic:
-            dic[dst] = 1
-        else:
-            dic[dst] += 1
-    for key in flow_statics:
-        flow_statics[key]['src_dst_ratio'] = dic[key[1]]
     flow_statics = {str(key): value for key, value in flow_statics.items()}
     return normalize(flow_statics)
 
