@@ -31,10 +31,9 @@
     * Payload: anomaly targets(IP, mac) in json format
 
 * Test
-    * using iperf to test, open iperf server at port 10000
-        * sudo docker exec -it {container_id} iperf -s -p 10000 -u
-    * using another host attack current host with port 10000
-        * iperf -c {host-ip} -p 10000 -t {attack-time} -u -b 1G
-
-    * using syn_attack.py to send TCP SYN flood
-        * sudo python syn_attack.py {src_IP} {src_port} {dst_IP} {dst_port}
+    * using udp flood to test
+        * sudo python flood_udp.py {dstIP} {dst port} {attack_time}
+        * Ref: https://gist.github.com/Ananasr/e05f3286b6ab94ec2c5431e64832c13e
+    * using TCP SYN flood to test
+        * sudo python SYN-Flood.py
+        * Ref: https://github.com/EmreOvunc/Python-SYN-Flood-Attack-Tool
