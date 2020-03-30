@@ -146,10 +146,8 @@ def _dojob(e, queue):
         if queue.empty() == False:
             obj = queue.get()
             feature_extract(obj)
-            current = obj[1]
-        else:
-            current = time.time()
-        if current - last >= polling_interval:
+        if time.time() - last >= polling_interval:
+            print queue.qsize()
             global flow_statics, src_addr_list, memory_data
 
             # calculate features in last 5 seconds
@@ -158,10 +156,9 @@ def _dojob(e, queue):
             memory_data.append(result)
             t_run_exp = threading.Thread(target=_run_exp, args=(result, src_addr_list, memory_data, ))
             t_run_exp.start()
-            t_run_exp.join()
             flow_statics = {}
             src_addr_list = []
-            last = current
+            last = time.time()
     K.backend.clear_session()
     del ip_model
     del mac_model
