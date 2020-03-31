@@ -332,7 +332,6 @@ def feature_extract(pkt_tuple):
     if sport != None or protocol == 'ICMP':
         ip_key = (sip, dip, sport, dport, protocol)
         mac_key = (smac, dmac, sport, dport, protocol)
-    print ip_key
     if ip.off & dpkt.ip.IP_MF:
         if (sip, pid) not in info:
             if sport == None:
