@@ -71,7 +71,7 @@ def on_message(mq, userdata, msg):
             start_flag = True
             
             
-            iface = sys.argv[3]
+            iface = 'eno1'
             ip = ni.ifaddresses(iface)[2][0]['addr']
             print 'listen ip', ip
            
@@ -105,8 +105,8 @@ def exit(signum, frame):
     sys.exit(1)
 
 def main():
-    if len(sys.argv) != 4:
-        print 'Usage: python run.py {broker_ip} {broker_port} {NIC_name}'
+    if len(sys.argv) != 3:
+        print 'Usage: python run.py {broker_ip} {broker_port}'
         sys.exit(1)
 
     global client
