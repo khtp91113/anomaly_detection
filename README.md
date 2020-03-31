@@ -4,9 +4,9 @@
     * Ref: https://github.com/NVIDIA/nvidia-docker
     * Ref: https://github.com/NVIDIA/nvidia-docker/wiki/Installation-(version-2.0)
 
-* Run docker: (port mapping: host port 10000 -> docker port 10000)
+* Run docker:
     * sudo docker load -i ddos_detect.tar
-    * sudo docker run --runtime=nvidia -p 0.0.0.0:10000:10000 -p 0.0.0.0:10000:10000/udp --name c1 -itd ddos_detect ddos_detect `<broker ipv4> <broker port>`
+    * sudo docker run --network host --runtime=nvidia --name c1 -it ddos_detect ddos_detect `<broker ipv4> <broker port> <NIC_name>`
 
 * If install sourcecode from github
     * apt update
@@ -15,7 +15,7 @@
     * git clone https://github.com/khtp91113/anomaly_detection.git
     * cd anomaly_detection
     * pip install -r requirements.txt
-    * python run.py `<broker ipv4> <broker port>`
+    * python run.py `<broker ipv4> <broker port> <NIC_name>`
 
 
 * using mqtt to start/stop AI detector
