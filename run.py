@@ -71,7 +71,7 @@ def on_message(mq, userdata, msg):
             start_flag = True
             
             
-            iface = 'eth0'
+            iface = sys.argv[3]
             ip = ni.ifaddresses(iface)[2][0]['addr']
             print 'listen ip', ip
            
@@ -105,8 +105,8 @@ def exit(signum, frame):
     sys.exit(1)
 
 def main():
-    if len(sys.argv) != 3:
-        print 'Usage: python run.py {broker_ip} {broker_port}'
+    if len(sys.argv) != 4:
+        print 'Usage: python run.py {broker_ip} {broker_port} {NIC_name}'
         sys.exit(1)
 
     global client
@@ -332,6 +332,7 @@ def feature_extract(pkt_tuple):
     if sport != None or protocol == 'ICMP':
         ip_key = (sip, dip, sport, dport, protocol)
         mac_key = (smac, dmac, sport, dport, protocol)
+    print ip_key
     if ip.off & dpkt.ip.IP_MF:
         if (sip, pid) not in info:
             if sport == None:
