@@ -28,6 +28,7 @@ warning_list = []
 miss_count = 0
 start_flag = False
 
+ignore_packet = {}
 src_addr_list = []
 info = {}
 flow_statics = {}
@@ -104,6 +105,14 @@ def exit(signum, frame):
     print 'mqtt disconnect'
     sys.exit(1)
 
+class Packet:
+    def __init__(self, tup=None, data=None, ptime=None):
+        self.tup = tup
+        self.data = data
+        self.ptime = ptime
+        self.next = None
+        return
+
 def main():
     if len(sys.argv) != 4:
         print 'Usage: python run.py {broker_ip} {broker_port} {NIC_name}'
@@ -142,10 +151,17 @@ def _dojob(e, queue):
             mac_model = K.models.load_model('gru_add_mac.hdf5')
             mac_model._make_predict_function()
     last = time.time()
+    lock = threading.Lock()
+    global ignore_packet
     while e.is_set() == False:
         if queue.empty() == False:
             obj = queue.get()
-            feature_extract(obj)
+            if (obj[0], obj[1]) in ignore_packet:
+                if str(obj[0]) == '140.114.89.68':
+                    print obj[3], ignore_packet[(obj[0], obj[1])]
+                if obj[3] <= ignore_packet[(obj[0], obj[1])]:
+                    continue
+            feature_extract((obj[2], obj[3]))
         if time.time() - last >= polling_interval:
             print queue.qsize()
             global flow_statics, src_addr_list, memory_data
@@ -154,8 +170,9 @@ def _dojob(e, queue):
             result = calculate_feature(flow_statics)
             memory_data.pop(0)
             memory_data.append(result)
-            t_run_exp = threading.Thread(target=_run_exp, args=(result, src_addr_list, memory_data, ))
+            t_run_exp = threading.Thread(target=_run_exp, args=(result, src_addr_list, memory_data, lock, ))
             t_run_exp.start()
+            t_run_exp.join()
             flow_statics = {}
             src_addr_list = []
             last = time.time()
@@ -168,7 +185,11 @@ def _sniff(e, iface, queue):
     pc = pcap.pcap(iface, promisc=True, immediate=True)
     pc.setfilter('ip')
     for ptime, pdata in pc:
-        queue.put((str(pdata), ptime))
+        eth = dpkt.ethernet.Ethernet(pdata)
+        ip = eth.data
+        sip = socket.inet_ntoa(ip.src)
+        smac = ':'.join('%02x' % compat_ord(b) for b in eth.src)
+        queue.put((sip, smac, str(pdata), ptime))
         if e.is_set():
             break
 
@@ -183,10 +204,11 @@ def post_broker(warning_list):
         print 'publish warning failed'
     return
 
-def _run_exp(flow_statics, src_addr_list, memory_data):
+def _run_exp(flow_statics, src_addr_list, memory_data, lock):
     global session1, session2, ip_model, mac_model
     print 'start testing'
     # get 5-tuple in last memory data
+    start = time.time()
     tuples = memory_data[-1].keys()
     # traceback memory data
     print 'test targets num: ', str(len(tuples))
@@ -289,8 +311,16 @@ def _run_exp(flow_statics, src_addr_list, memory_data):
     if len(tmp_warning_list) == 0:
         return
     d = {"blocklists": []}
+    global ignore_packet
+    #tmp_ignore_packet = ignore_packet
     for data in tmp_warning_list:
         d["blocklists"].append({"mac": data[1], "ipv4": data[0]})
+        #if data in ignore_packet:
+        #    ignore_packet[data] = max(tmp_ignore_packet[data], stop_time)
+        ignore_packet[data] = stop_time
+    #lock.acquire()
+    #ignore_packet = tmp_ignore_packet
+    #lock.release()
     post_broker(d)
     return
 
@@ -406,7 +436,9 @@ def update_data(key, eth, protocol, pkt_time):
             'Duration': polling_interval,
             'FPS': 0,
             'TBT': 0,
-            'Payloads': [],
+            'Payloads': {},
+            'pay_sum': 0,
+            'pay_sq': 0,
             'APL': 0,
             'DPL': 0,
             'PV': 0,
@@ -433,7 +465,12 @@ def update_data(key, eth, protocol, pkt_time):
     if flow_statics[key]['FPS'] == 0:
         flow_statics[key]['FPS'] = len(eth)
     flow_statics[key]['TBT'] += len(eth)
-    flow_statics[key]['Payloads'].append(len(data))
+    if len(data) not in flow_statics[key]['Payloads']:
+        flow_statics[key]['Payloads'][len(data)] = 1
+    else:
+        flow_statics[key]['Payloads'][len(data)] += 1
+    flow_statics[key]['pay_sum'] += len(data)
+    flow_statics[key]['pay_sq'] += len(data)**2
     if flow_statics[key]['last_seen'] != 0:
         flow_statics[key]['inter_arrival'].append(pkt_time-flow_statics[key]['last_seen'])
     flow_statics[key]['last_seen'] = pkt_time
@@ -443,11 +480,11 @@ def calculate_feature(flow_statics):
     dst_dic = {}
     src_dic = {}
     for key in flow_statics:
-        flow_statics[key]['PSP'] = round(float(flow_statics[key]['NSP']) / flow_statics[key]['PX'], 2)
+        flow_statics[key]['PSP'] = float(flow_statics[key]['NSP']) / flow_statics[key]['PX']
         asymmetric = (key[1], key[0], key[3], key[2], key[4])
         if asymmetric in flow_statics:
-            flow_statics[key]['IOPR_P'] = round(float(flow_statics[key]['PX']) / flow_statics[asymmetric]['PX'], 2)
-            flow_statics[key]['IOPR_B'] = round(float(flow_statics[key]['TBT']) / flow_statics[asymmetric]['TBT'], 2)
+            flow_statics[key]['IOPR_P'] = float(flow_statics[key]['PX']) / flow_statics[asymmetric]['PX']
+            flow_statics[key]['IOPR_B'] = float(flow_statics[key]['TBT']) / flow_statics[asymmetric]['TBT']
         else:
             flow_statics[key]['IOPR_P'] = flow_statics[key]['PX']
             flow_statics[key]['IOPR_B'] = flow_statics[key]['TBT']
@@ -457,17 +494,18 @@ def calculate_feature(flow_statics):
             if flow_statics[key]['Duration'] < 0:
                 print key, flow_statics[key]['last_seen'], flow_statics[key]['first_seen']
 
-        flow_statics[key]['APL'] = round(float(sum(flow_statics[key]['Payloads']))/len(flow_statics[key]['Payloads']), 2)
-        counts = dict((x, flow_statics[key]['Payloads'].count(x)) for x in flow_statics[key]['Payloads'])
-        flow_statics[key]['DPL'] = round(float(max(counts.iteritems(), key=operator.itemgetter(1))[0]) / flow_statics[key]['PX'], 2)
-        flow_statics[key]['PV'] = round(np.std(flow_statics[key]['Payloads']), 2)
+        flow_statics[key]['APL'] = float(flow_statics[key]['pay_sum'])/flow_statics[key]['PX']
+        #counts = dict((x, flow_statics[key]['Payloads'].count(x)) for x in flow_statics[key]['Payloads'])
+        #flow_statics[key]['DPL'] = round(float(max(counts.iteritems(), key=operator.itemgetter(1))[0]) / flow_statics[key]['PX'], 2)
+        flow_statics[key]['DPL'] = float(max(flow_statics[key]['Payloads'].values()))/flow_statics[key]['PX']
+        #flow_statics[key]['PV'] = np.std(flow_statics[key]['Payloads'])
+        flow_statics[key]['PV'] = (float(flow_statics[key]['pay_sq'])/flow_statics[key]['PX'] - flow_statics[key]['APL']**2)**0.5
         if len(flow_statics[key]['inter_arrival']) != 0:
-            flow_statics[key]['AIT'] = round(sum(flow_statics[key]['inter_arrival']) / len(flow_statics[key]['inter_arrival']), 2)
+            flow_statics[key]['AIT'] = sum(flow_statics[key]['inter_arrival']) / len(flow_statics[key]['inter_arrival'])
         else:
             flow_statics[key]['AIT'] = polling_interval
-        flow_statics[key]['BS'] = round(flow_statics[key]['TBT'] / flow_statics[key]['Duration'], 2)
-        flow_statics[key]['PPS'] = round(flow_statics[key]['PX'] / flow_statics[key]['Duration'], 2)
-        flow_statics[key]['Duration'] = flow_statics[key]['Duration']
+        flow_statics[key]['BS'] = flow_statics[key]['TBT'] / flow_statics[key]['Duration']
+        flow_statics[key]['PPS'] = flow_statics[key]['PX'] / flow_statics[key]['Duration']
         flow_statics[key].pop('Payloads', None)
         flow_statics[key].pop('last_seen', None)
         flow_statics[key].pop('first_seen', None)
