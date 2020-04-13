@@ -151,7 +151,6 @@ def _dojob(e, queue):
             mac_model = K.models.load_model('gru_add_mac.hdf5')
             mac_model._make_predict_function()
     last = time.time()
-    lock = threading.Lock()
     global ignore_packet
     while e.is_set() == False:
         if queue.empty() == False:
@@ -170,7 +169,7 @@ def _dojob(e, queue):
             result = calculate_feature(flow_statics)
             memory_data.pop(0)
             memory_data.append(result)
-            t_run_exp = threading.Thread(target=_run_exp, args=(result, src_addr_list, memory_data, lock, ))
+            t_run_exp = threading.Thread(target=_run_exp, args=(result, src_addr_list, memory_data, ))
             t_run_exp.start()
             t_run_exp.join()
             flow_statics = {}
@@ -204,7 +203,7 @@ def post_broker(warning_list):
         print 'publish warning failed'
     return
 
-def _run_exp(flow_statics, src_addr_list, memory_data, lock):
+def _run_exp(flow_statics, src_addr_list, memory_data):
     global session1, session2, ip_model, mac_model
     print 'start testing'
     # get 5-tuple in last memory data
@@ -312,15 +311,10 @@ def _run_exp(flow_statics, src_addr_list, memory_data, lock):
         return
     d = {"blocklists": []}
     global ignore_packet
-    #tmp_ignore_packet = ignore_packet
+    stop_time = time.time()
     for data in tmp_warning_list:
         d["blocklists"].append({"mac": data[1], "ipv4": data[0]})
-        #if data in ignore_packet:
-        #    ignore_packet[data] = max(tmp_ignore_packet[data], stop_time)
         ignore_packet[data] = stop_time
-    #lock.acquire()
-    #ignore_packet = tmp_ignore_packet
-    #lock.release()
     post_broker(d)
     return
 
