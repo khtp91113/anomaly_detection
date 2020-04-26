@@ -28,7 +28,6 @@ feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 
 feature_dis = [2,3,4,7,8,9,10,12,15,16,17,18,19]
 timestep = 12
 memory_data = [{} for x in range(timestep)]
-warning_list = []
 miss_count = 0
 start_flag = False
 
@@ -92,7 +91,7 @@ def on_connect(mq, userdata, flags, rc):
 def on_message(mq, userdata, msg):
     print 'topic: ', msg.topic
     print 'payload: ', msg.payload
-    global start_flag, flow_statics, p_dojob, p_sniff, e, queue, client
+    global start_flag, flow_statics, p_dojob, p_sniff, e, queue, client, listen_ip
     if msg.topic == 'action':
         if msg.payload == 'start':
             if start_flag == True:
@@ -102,8 +101,8 @@ def on_message(mq, userdata, msg):
             start_flag = True
            
             iface = sys.argv[3]
-            ip = ni.ifaddresses(iface)[2][0]['addr']
-            print 'listen ip', ip
+            listen_ip = ni.ifaddresses(iface)[2][0]['addr']
+            print 'listen ip', listen_ip
            
             e = mp.Event()
             ready = mp.Event()
@@ -286,8 +285,7 @@ def _run_exp(flow_statics, src_addr_list, memory_data):
     #del mac_data
     ip_index = 0
     mac_index = 0
-    global last_warning
-    warning = {}
+    global listen_ip
     for ind in range(len(ip_tuples)):
         tuples = ip_tuples[ind]
         flag = False
@@ -300,15 +298,9 @@ def _run_exp(flow_statics, src_addr_list, memory_data):
             if result[1] >= result[0]:
                 flag = True
                 break
-        if flag:
-            if (tuples[0], m_tuples[0]) not in last_warning:
-                warning[(tuples[0], m_tuples[0])] = 0
-            else:
-                warning[(tuples[0], m_tuples[0])] = last_warning[(tuples[0], m_tuples[0])]
-            warning[(tuples[0], m_tuples[0])] += 1
-            if warning[(tuples[0], m_tuples[0])] > 2:
+        if flag and tuples[0] != listen_ip:
+            if (tuples[0], m_tuples[0]) not in tmp_warning_list:
                 tmp_warning_list.append((tuples[0], m_tuples[0]))
-    last_warning = warning
     if len(tmp_warning_list) == 0:
         return
     d = {"blocklists": []}
@@ -342,6 +334,7 @@ def feature_extract(pkt_tuple):
         protocol = 'TCP'
     elif ip.p == dpkt.ip.IP_PROTO_ICMP:
         protocol = 'ICMP'
+        return
 
     proto = ip.data
     try:
