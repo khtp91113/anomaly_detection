@@ -175,16 +175,14 @@ def _dojob(ready, e, queue):
     with ip_graph.as_default():
         session1 = Session()
         with session1.as_default():
-            #ip_model = K.models.load_model('gru_ip_4tuple.hdf5', custom_objects={'attention':attention})
-            ip_model = K.models.load_model('../logs/fake/gru_modify_model_4tuple_1.hdf5', custom_objects={'attention':attention})
+            ip_model = K.models.load_model('gru_ip_4tuple.hdf5', custom_objects={'attention':attention})
             ip_model._make_predict_function()
 
     mac_graph = Graph()
     with mac_graph.as_default():
         session2 = Session()
         with session2.as_default():
-            #mac_model = K.models.load_model('gru_mac_4tuple.hdf5', custom_objects={'attention':attention})
-            mac_model = K.models.load_model('../logs_mac/fake/gru_modify_model_4tuple_1.hdf5', custom_objects={'attention':attention})
+            mac_model = K.models.load_model('gru_mac_4tuple.hdf5', custom_objects={'attention':attention})
             mac_model._make_predict_function()
     ready.set()
     print 'set ready'
