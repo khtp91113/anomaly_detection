@@ -291,13 +291,11 @@ def _run_exp(flow_statics, src_addr_list, memory_data):
     for ind in range(len(ip_tuples)):
         tuples = ip_tuples[ind]
         flag = False
-        target = True
             
         for m_tuples in src_addr_list[tuples]:
             mac_ind = mac_tuples.index(m_tuples)
             ip_pre = ip_result[ind]
             mac_pre = mac_result[mac_ind]
-            if target:
             result = ip_pre+mac_pre
             if result[1] >= result[0]:
                 flag = True
