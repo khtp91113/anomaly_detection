@@ -101,10 +101,9 @@ def on_message(mq, userdata, msg):
             flow_statics = {}
             start_flag = True
            
-            print 'hi'
             iface = sys.argv[3]
-            #ip = ni.ifaddresses(iface)[2][0]['addr']
-            #print 'listen ip', ip
+            ip = ni.ifaddresses(iface)[2][0]['addr']
+            print 'listen ip', ip
            
             e = mp.Event()
             ready = mp.Event()
@@ -294,16 +293,11 @@ def _run_exp(flow_statics, src_addr_list, memory_data):
         flag = False
         target = True
             
-        if tuples[0] == '10.0.0.2':
-            target = True
-        if target:
-            print tuples, ip_data[ind], ip_result[ind]
         for m_tuples in src_addr_list[tuples]:
             mac_ind = mac_tuples.index(m_tuples)
             ip_pre = ip_result[ind]
             mac_pre = mac_result[mac_ind]
             if target:
-                print m_tuples, mac_data[mac_ind], mac_result[mac_ind]
             result = ip_pre+mac_pre
             if result[1] >= result[0]:
                 flag = True
@@ -566,7 +560,6 @@ def calculate_feature(flow_statics):
         dst = key[1]
         flow_statics[key]['src_dst_ratio'] = float(dst_dic[dst])/src_dic[dst]
         flow_statics[key].pop('src_port_list', None)
-    print flow_statics
     return normalize(flow_statics)
 
 def normalize(flow_statics):
