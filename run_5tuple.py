@@ -19,31 +19,25 @@ import paho.mqtt.publish as publish
 import socket
 import operator
 import multiprocessing as mp
-import math
 
 polling_interval = 5
-feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX', 'src_dst_ratio', 'proto1', 'proto2', 'proto3','proto4']
-#feature_dis = [1, 2,3,4,7,8,9,10,12,15,16,17,18,19]
-#feature_dis = [15,16,17,18,19]
-feature_dis = [2,3,4,7,8,9,10,12,15,16,17,18,19]
-timestep = 12
+feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX']
+timestep = 7
 memory_data = [{} for x in range(timestep)]
 warning_list = []
 miss_count = 0
 start_flag = False
 
-mapping = {'None':[1,0,0,0],'ICMP':[0,1,0,0],'TCP':[0,0,1,0],'UDP':[0,0,0,1]}
 ignore_packet = {}
-src_addr_list = {}
+src_addr_list = []
 info = {}
 flow_statics = {}
-last_warning = {}
 mac_dic = {}
-with open('mean_std_mac_new.json', 'r') as f:
+with open('mean_std_mac.json', 'r') as f:
     mac_dic = json.load(f)
 
 ip_dic = {}
-with open('mean_std_ip_new.json', 'r') as f:
+with open('mean_std_ip.json', 'r') as f:
     ip_dic = json.load(f)
 
 def feature_default(dic):
@@ -51,40 +45,16 @@ def feature_default(dic):
     for feature in feature_set:
         if feature == 'AIT' or feature == 'Duration':
             value = 5.0
-        elif feature == 'IOPR_B' or feature == 'IOPR_P' or feature == 'src_dst_ratio':
+        elif feature == 'IOPR_B' or feature == 'IOPR_P':
             value = 1.0
         else:
             value = 0.0
-        if 'proto' not in feature:
-            norm = (value-float(dic[feature]['m']))/float(dic[feature]['s'])
-            data.append(norm)
-        else:
-            data.append(0)
+        norm = (value-float(dic[feature]['m']))/float(dic[feature]['s'])
+        data.append(norm)
     return data
 
 ip_default_feature = feature_default(ip_dic)
 mac_default_feature = feature_default(mac_dic)
-class attention(K.layers.Layer):
-    def __init__(self,**kwargs):
-        super(attention,self).__init__(**kwargs)
-
-    def build(self,input_shape):
-        self.W=self.add_weight(name="att_weight",shape=(input_shape[-1],1),initializer="normal")
-        self.b=self.add_weight(name="att_bias",shape=(input_shape[1],1),initializer="zeros")
-        super(attention, self).build(input_shape)
-
-    def call(self,x):
-        et=K.backend.squeeze(K.backend.tanh(K.backend.dot(x,self.W)+self.b),axis=-1)
-        at=K.backend.softmax(et)
-        at=K.backend.expand_dims(at,axis=-1)
-        output=x*at
-        return K.backend.sum(output,axis=1)
-
-    def compute_output_shape(self,input_shape):
-        return (input_shape[0],input_shape[-1])
-
-    def get_config(self):
-        return super(attention,self).get_config()
 
 def on_connect(mq, userdata, flags, rc):
     mq.subscribe('action')
@@ -100,22 +70,18 @@ def on_message(mq, userdata, msg):
                 return
             flow_statics = {}
             start_flag = True
-           
-            print 'hi'
+            
+            
             iface = sys.argv[3]
-            #ip = ni.ifaddresses(iface)[2][0]['addr']
-            #print 'listen ip', ip
+            ip = ni.ifaddresses(iface)[2][0]['addr']
+            print 'listen ip', ip
            
             e = mp.Event()
-            ready = mp.Event()
             queue = mp.Queue()
             p_sniff = mp.Process(target=_sniff, args=(e, iface, queue, ), name='t_sniff')
-            p_dojob = mp.Process(target=_dojob, args=(ready, e, queue, ), name='t_dojob')
-            print 'start dojob'
+            p_dojob = mp.Process(target=_dojob, args=(e, queue, ), name='t_dojob')
+
             p_dojob.start()
-            print 'wait ready'
-            while ready.is_set() == False:
-                pass
             p_sniff.start()
             print 'service start'
             return
@@ -168,26 +134,22 @@ def main():
     client.loop_forever()
 
 
-def _dojob(ready, e, queue):
+def _dojob(e, queue):
     prctl.set_name('AI detector - do job')
     global session1, session2, ip_model, mac_model
     ip_graph = Graph()
     with ip_graph.as_default():
         session1 = Session()
         with session1.as_default():
-            #ip_model = K.models.load_model('gru_ip_4tuple.hdf5', custom_objects={'attention':attention})
-            ip_model = K.models.load_model('../logs/fake/gru_modify_model_4tuple_1.hdf5', custom_objects={'attention':attention})
+            ip_model = K.models.load_model('gru_add_ip.hdf5')
             ip_model._make_predict_function()
 
     mac_graph = Graph()
     with mac_graph.as_default():
         session2 = Session()
         with session2.as_default():
-            #mac_model = K.models.load_model('gru_mac_4tuple.hdf5', custom_objects={'attention':attention})
-            mac_model = K.models.load_model('../logs_mac/fake/gru_modify_model_4tuple_1.hdf5', custom_objects={'attention':attention})
+            mac_model = K.models.load_model('gru_add_mac.hdf5')
             mac_model._make_predict_function()
-    ready.set()
-    print 'set ready'
     last = time.time()
     global ignore_packet
     while e.is_set() == False:
@@ -209,7 +171,7 @@ def _dojob(ready, e, queue):
             t_run_exp.start()
             t_run_exp.join()
             flow_statics = {}
-            src_addr_list = {}
+            src_addr_list = []
             last = time.time()
     K.backend.clear_session()
     del ip_model
@@ -242,7 +204,8 @@ def post_broker(warning_list):
 def _run_exp(flow_statics, src_addr_list, memory_data):
     global session1, session2, ip_model, mac_model
     print 'start testing'
-    # get 4-tuple in last memory data
+    # get 5-tuple in last memory data
+    start = time.time()
     tuples = memory_data[-1].keys()
     # traceback memory data
     print 'test targets num: ', str(len(tuples))
@@ -252,73 +215,96 @@ def _run_exp(flow_statics, src_addr_list, memory_data):
     src_MAC_port_result = {}
     ip_data = []
     mac_data = []
-    ip_tuples = []
-    mac_tuples = []
     ## predict only once
     for t in tuples:
         datas = []
-        # ip 4-tuple
-        if '.' in t[0]:
+        # ip 5-tuple
+        if '.' in t:
             for mem in memory_data:
                 if t in mem:
-                    datas.append(mem[t])
+                    datas.append(mem[t]+[0])
                 else:
-                    datas.append(ip_default_feature)
+                    datas.append(ip_default_feature+[0])
             ip_data.append(datas)
-            ip_tuples.append(t)
-        # mac 4-tuple
+        # mac 5-tuple
         else:
             for mem in memory_data:
                 if t in mem:
-                    datas.append(mem[t])
+                    datas.append(mem[t]+[0])
                 else:
-                    datas.append(mac_default_feature)
+                    datas.append(mac_default_feature+[0])
             mac_data.append(datas)
-            mac_tuples.append(t)
     if len(ip_data) == 0 or len(mac_data) == 0:
         return
-    ip_data = np.delete(ip_data, feature_dis, 2)
-    mac_data = np.delete(mac_data, feature_dis, 2)
     K.backend.set_session(session1)
     ip_model._make_predict_function()
     ip_result = ip_model.predict(np.array(ip_data))
     K.backend.set_session(session2)
     mac_model._make_predict_function()
     mac_result = mac_model.predict(np.array(mac_data))
-    #del ip_data
-    #del mac_data
+    del ip_data
+    del mac_data
     ip_index = 0
     mac_index = 0
-    global last_warning
-    warning = {}
-    for ind in range(len(ip_tuples)):
-        tuples = ip_tuples[ind]
-        flag = False
-        target = True
-            
-        if tuples[0] == '10.0.0.2':
-            target = True
-        if target:
-            print tuples, ip_data[ind], ip_result[ind]
-        for m_tuples in src_addr_list[tuples]:
-            mac_ind = mac_tuples.index(m_tuples)
-            ip_pre = ip_result[ind]
-            mac_pre = mac_result[mac_ind]
-            if target:
-                print m_tuples, mac_data[mac_ind], mac_result[mac_ind]
-            result = ip_pre+mac_pre
-            if result[1] >= result[0]:
-                flag = True
-                break
-        if flag:
-            if (tuples[0], m_tuples[0]) not in last_warning:
-                warning[(tuples[0], m_tuples[0])] = 0
+    for t in tuples:
+        # ip 5-tuple
+        if '.' in t:
+            tmp = t.split('\'')
+
+            #print tmp
+            src_IP = tmp[1]
+            src_port = None
+            pkt_id = None
+            # ICMP
+            if len(tmp) == 7:
+                src_port = None
+            elif len(tmp) == 9:
+                # no port, has pkt ID => fragment
+                pkt_id = tmp[7]
+            # normal 5-tuple
             else:
-                warning[(tuples[0], m_tuples[0])] = last_warning[(tuples[0], m_tuples[0])]
-            warning[(tuples[0], m_tuples[0])] += 1
-            if warning[(tuples[0], m_tuples[0])] > 2:
-                tmp_warning_list.append((tuples[0], m_tuples[0]))
-    last_warning = warning
+                src_port = tmp[5]
+            if src_IP not in src_IP_port_result:
+                src_IP_port_result[src_IP] = {}
+            l = ip_result[ip_index].tolist()
+            if src_port == None:
+                src_IP_port_result[src_IP][(src_port, pkt_id)] = l
+            else:
+                src_IP_port_result[src_IP][src_port] = l
+            ip_index += 1
+                
+        # mac 5-tuple
+        else:
+            tmp = t.split('\'')
+            src_MAC = tmp[1]
+            src_port = None
+            pkt_id = None
+            if len(tmp) == 7:
+                src_port = None
+            elif len(tmp) == 9:
+                pkt_id = tmp[7]
+            else:
+                src_port = tmp[5]
+
+            if src_MAC not in src_MAC_port_result:
+                src_MAC_port_result[src_MAC] = {}
+            l = mac_result[mac_index].tolist()
+            if src_port == None:
+                src_MAC_port_result[src_MAC][(src_port, pkt_id)] = l
+            else:
+                src_MAC_port_result[src_MAC][src_port] = l
+            mac_index += 1
+    del ip_result
+    del mac_result
+    for src in src_addr_list:
+        same_ports = set(src_IP_port_result[src[0]]).intersection(set(src_MAC_port_result[src[1]]))
+        for port in same_ports:
+            benign_prob = src_IP_port_result[src[0]][port][0] + src_MAC_port_result[src[1]][port][0]
+            ddos_prob = src_IP_port_result[src[0]][port][1] + src_MAC_port_result[src[1]][port][1]
+            if ddos_prob >= benign_prob:
+                if src not in tmp_warning_list:
+                    tmp_warning_list.append(src)
+                break
     if len(tmp_warning_list) == 0:
         return
     d = {"blocklists": []}
@@ -335,12 +321,9 @@ def feature_extract(pkt_tuple):
     raw_pkt = pkt_tuple[0]
     pkt_time = pkt_tuple[1]
     eth = dpkt.ethernet.Ethernet(raw_pkt)
-    try:
-        ip = eth.data
-        sip = socket.inet_ntoa(ip.src)
-        dip = socket.inet_ntoa(ip.dst)
-    except:
-        return
+    ip = eth.data
+    sip = socket.inet_ntoa(ip.src)
+    dip = socket.inet_ntoa(ip.dst)
 
     smac = ':'.join('%02x' % compat_ord(b) for b in eth.src)
     dmac = ':'.join('%02x' % compat_ord(b) for b in eth.dst)
@@ -363,22 +346,24 @@ def feature_extract(pkt_tuple):
     except:
         dport = None
 
+    if (sip, smac) not in src_addr_list:
+        src_addr_list.append((sip, smac))
     ip_key = None
     mac_key = None
     pid = str(ip.id)
     if sport != None or protocol == 'ICMP':
-        ip_key = (sip, dip, dport, protocol)
-        mac_key = (smac, dmac, dport, protocol)
+        ip_key = (sip, dip, sport, dport, protocol)
+        mac_key = (smac, dmac, sport, dport, protocol)
     if ip.off & dpkt.ip.IP_MF:
         if (sip, pid) not in info:
             if sport == None:
-                ip_key = (sip, dip, dport, protocol, pid)
+                ip_key = (sip, dip, sport, dport, protocol, pid)
             info[(sip, pid)] = ip_key
         else:
             ip_key = info[(sip, pid)]
         if (smac, pid) not in info:
             if sport == None:
-                mac_key = (smac, dmac, dport, protocol, pid)
+                mac_key = (smac, dmac, sport, dport, protocol, pid)
             info[(smac, pid)] = mac_key
         else:
             mac_key = info[(smac, pid)]
@@ -420,19 +405,16 @@ def feature_extract(pkt_tuple):
                     if old_key in flow_statics:
                         flow_statics[mac_key] = flow_statics[old_key].copy()
                         del flow_statics[old_key]
-            info.pop((smac, pid), None)
+            info.pop((sip, pid), None)
     if ip_key == None or mac_key == None:
         miss_count += 1
         return
-    if ip_key not in src_addr_list:
-        src_addr_list[ip_key] = [mac_key]
+    update_data(ip_key, eth, protocol, pkt_time)
+    update_data(mac_key, eth, protocol, pkt_time)
 
-    update_data(ip_key, eth, protocol, pkt_time, sport)
-    update_data(mac_key, eth, protocol, pkt_time, sport)
-
-def update_data(key, eth, protocol, pkt_time, sport):
+def update_data(key, eth, protocol, pkt_time):
     global flow_statics
-    # 4-tuple
+    # 5-tuple
     ip = eth.data
     proto = ip.data
     if key not in flow_statics:
@@ -446,6 +428,9 @@ def update_data(key, eth, protocol, pkt_time, sport):
             'Duration': polling_interval,
             'FPS': 0,
             'TBT': 0,
+            'Payloads': {},
+            'pay_sum': 0,
+            'pay_sq': 0,
             'APL': 0,
             'DPL': 0,
             'PV': 0,
@@ -454,17 +439,7 @@ def update_data(key, eth, protocol, pkt_time, sport):
             'first_seen': 0,
             'inter_arrival': [],
             'AIT': 0,
-            'PPS': 0,
-            'src_dst_ratio': 0,
-            'proto1': 0,
-            'proto2': 0,
-            'proto3': 0,
-            'proto4': 0,
-            'pay_sum': 0,
-            'pay_square': 0,
-            'pay_dict': {},
-            'src_port_list': []}
-
+            'PPS': 0}
     flow_statics[key]['PX'] += 1
     # no protocol layer
     if type(proto) == str:
@@ -482,93 +457,52 @@ def update_data(key, eth, protocol, pkt_time, sport):
     if flow_statics[key]['FPS'] == 0:
         flow_statics[key]['FPS'] = len(eth)
     flow_statics[key]['TBT'] += len(eth)
-    if len(data) not in flow_statics[key]['pay_dict']:
-        flow_statics[key]['pay_dict'][len(data)] = 0
-    flow_statics[key]['pay_dict'][len(data)] += 1
+    if len(data) not in flow_statics[key]['Payloads']:
+        flow_statics[key]['Payloads'][len(data)] = 1
+    else:
+        flow_statics[key]['Payloads'][len(data)] += 1
+    flow_statics[key]['pay_sum'] += len(data)
+    flow_statics[key]['pay_sq'] += len(data)**2
     if flow_statics[key]['last_seen'] != 0:
         flow_statics[key]['inter_arrival'].append(pkt_time-flow_statics[key]['last_seen'])
     flow_statics[key]['last_seen'] = pkt_time
-    flow_statics[key]['pay_sum'] += len(data)
-    flow_statics[key]['pay_square'] += len(data)**2
-    if sport not in flow_statics[key]['src_port_list']:
-        flow_statics[key]['src_port_list'].append(sport)
 
 # TODO every 5 seconds calculate once
 def calculate_feature(flow_statics):
     dst_dic = {}
     src_dic = {}
     for key in flow_statics:
-
         flow_statics[key]['PSP'] = float(flow_statics[key]['NSP']) / flow_statics[key]['PX']
-        # deal with assymetric
-        if key[2] == None and key[3] != 'ICMP':
+        asymmetric = (key[1], key[0], key[3], key[2], key[4])
+        if asymmetric in flow_statics:
+            flow_statics[key]['IOPR_P'] = float(flow_statics[key]['PX']) / flow_statics[asymmetric]['PX']
+            flow_statics[key]['IOPR_B'] = float(flow_statics[key]['TBT']) / flow_statics[asymmetric]['TBT']
+        else:
             flow_statics[key]['IOPR_P'] = flow_statics[key]['PX']
             flow_statics[key]['IOPR_B'] = flow_statics[key]['TBT']
-        else:
-            asy_pkt = 0
-            asy_byte = 0
-            for src_port in flow_statics[key]['src_port_list']:
-                asymmetric = (key[1], key[0], src_port, key[3])
-                if asymmetric in flow_statics:
-                    asy_pkt += flow_statics[asymmetric]['PX']
-                    asy_byte += flow_statics[asymmetric]['TBT']
-            if asy_pkt != 0:
-                flow_statics[key]['IOPR_P'] = float(flow_statics[key]['PX']) / asy_pkt
-            else:
-                flow_statics[key]['IOPR_P'] = flow_statics[key]['PX']
-            if asy_byte != 0:
-                flow_statics[key]['IOPR_B'] = float(flow_statics[key]['TBT']) / asy_byte
-            else:
-                flow_statics[key]['IOPR_B'] = flow_statics[key]['TBT']
 
         if flow_statics[key]['last_seen'] - flow_statics[key]['first_seen'] != 0:
             flow_statics[key]['Duration'] = flow_statics[key]['last_seen'] - flow_statics[key]['first_seen']
             if flow_statics[key]['Duration'] < 0:
                 print key, flow_statics[key]['last_seen'], flow_statics[key]['first_seen']
 
-        #flow_statics[key]['APL'] = str(float(flow_statics[key]['pay_sum'])/len(flow_statics[key]['Payloads']))
         flow_statics[key]['APL'] = float(flow_statics[key]['pay_sum'])/flow_statics[key]['PX']
-
-        h = 0
-        n = flow_statics[key]['PX']
-        for p, l in flow_statics[key]['pay_dict'].iteritems():
-            h += (float(l)/n) * math.log(float(l)/n, 2)
-        h *= -1
-        flow_statics[key]['DPL'] = h
-        flow_statics[key]['PV'] = (float(flow_statics[key]['pay_square']) / flow_statics[key]['PX'] - float(flow_statics[key]['APL'])**2)**0.5
-
+        #counts = dict((x, flow_statics[key]['Payloads'].count(x)) for x in flow_statics[key]['Payloads'])
+        #flow_statics[key]['DPL'] = round(float(max(counts.iteritems(), key=operator.itemgetter(1))[0]) / flow_statics[key]['PX'], 2)
+        flow_statics[key]['DPL'] = float(max(flow_statics[key]['Payloads'].values()))/flow_statics[key]['PX']
+        #flow_statics[key]['PV'] = np.std(flow_statics[key]['Payloads'])
+        flow_statics[key]['PV'] = (float(flow_statics[key]['pay_sq'])/flow_statics[key]['PX'] - flow_statics[key]['APL']**2)**0.5
         if len(flow_statics[key]['inter_arrival']) != 0:
             flow_statics[key]['AIT'] = sum(flow_statics[key]['inter_arrival']) / len(flow_statics[key]['inter_arrival'])
         else:
             flow_statics[key]['AIT'] = polling_interval
         flow_statics[key]['BS'] = flow_statics[key]['TBT'] / flow_statics[key]['Duration']
         flow_statics[key]['PPS'] = flow_statics[key]['PX'] / flow_statics[key]['Duration']
-        flow_statics[key].pop('pay_dict', None)
+        flow_statics[key].pop('Payloads', None)
         flow_statics[key].pop('last_seen', None)
         flow_statics[key].pop('first_seen', None)
         flow_statics[key].pop('inter_arrival', None)
-        flow_statics[key].pop('pay_sum', None)
-        flow_statics[key].pop('pay_square', None)
-        dst = key[1]
-        if dst not in dst_dic:
-            dst_dic[dst] = 0
-        dst_dic[dst] += len(flow_statics[key]['src_port_list'])
-        if dst not in src_dic:
-            src_dic[dst] = 1
-
-        flow_statics[key]['proto1'] = mapping[str(key[3])][0]
-        flow_statics[key]['proto2'] = mapping[str(key[3])][1]
-        flow_statics[key]['proto3'] = mapping[str(key[3])][2]
-        flow_statics[key]['proto4'] = mapping[str(key[3])][3]
-    for key in flow_statics:
-        src = key[0]
-        if src in src_dic:
-            src_dic[src] += len(flow_statics[key]['src_port_list'])
-    for key in flow_statics:
-        dst = key[1]
-        flow_statics[key]['src_dst_ratio'] = float(dst_dic[dst])/src_dic[dst]
-        flow_statics[key].pop('src_port_list', None)
-    print flow_statics
+    flow_statics = {str(key): value for key, value in flow_statics.items()}
     return normalize(flow_statics)
 
 def normalize(flow_statics):
@@ -576,21 +510,15 @@ def normalize(flow_statics):
         data = []
         if '.' in index[0]:
             for feature in feature_set:
-                if 'proto' not in feature:
-                    norm = (float(flow_statics[index][feature])-float(ip_dic[feature]['m']))/float(ip_dic[feature]['s'])
-                    data.append(norm)
-                else:
-                    data.append(flow_statics[index][feature])
+                norm = (float(flow_statics[index][feature])-float(ip_dic[feature]['m']))/float(ip_dic[feature]['s'])
+                data.append(norm)
             flow_statics[index] = data
         else:
             for feature in feature_set:
-                if 'proto' not in feature:
-                    norm = (float(flow_statics[index][feature])-float(mac_dic[feature]['m']))/float(mac_dic[feature]['s'])
-                    data.append(norm)
-                else:
-                    data.append(flow_statics[index][feature])
+                norm = (float(flow_statics[index][feature])-float(mac_dic[feature]['m']))/float(mac_dic[feature]['s'])
+                data.append(norm)
             flow_statics[index] = data
     return flow_statics
-
+            
 if __name__ == '__main__':
     main()
