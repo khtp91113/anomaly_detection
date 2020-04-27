@@ -7,7 +7,7 @@ import sys
 import threading
 import pcap
 import prctl
-from tensorflow import Graph, Session
+from tensorflow import Graph, Session, ConfigProto
 import pcap
 import Queue
 import dpkt
@@ -20,7 +20,6 @@ import socket
 import operator
 import multiprocessing as mp
 import math
-
 polling_interval = 5
 feature_set = ['AIT', 'PSP', 'BS', 'FPS', 'NNP', 'DPL', 'IOPR_B', 'APL', 'PPS', 'TBT', 'Duration', 'IOPR_P', 'PV', 'NSP', 'PX', 'src_dst_ratio', 'proto1', 'proto2', 'proto3','proto4']
 #feature_dis = [1, 2,3,4,7,8,9,10,12,15,16,17,18,19]
@@ -170,15 +169,17 @@ def _dojob(ready, e, queue):
     prctl.set_name('AI detector - do job')
     global session1, session2, ip_model, mac_model
     ip_graph = Graph()
+    config = ConfigProto()
+    config.gpu_options.allow_growth = True
     with ip_graph.as_default():
-        session1 = Session()
+        session1 = Session(config=config)
         with session1.as_default():
             ip_model = K.models.load_model('gru_ip_4tuple.hdf5', custom_objects={'attention':attention})
             ip_model._make_predict_function()
 
     mac_graph = Graph()
     with mac_graph.as_default():
-        session2 = Session()
+        session2 = Session(config=config)
         with session2.as_default():
             mac_model = K.models.load_model('gru_mac_4tuple.hdf5', custom_objects={'attention':attention})
             mac_model._make_predict_function()
